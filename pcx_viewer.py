@@ -1,11 +1,13 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog, messagebox, simpledialog
 from PIL import Image, ImageTk
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from pcxdecoder import decode_pcx
 import viewer_style as style
+import image_processing as ip
+import filters as ft  
 from typing import List, Tuple
 from io import BytesIO
 
@@ -92,6 +94,72 @@ class PCXViewer(tk.Frame):
                   bg=style.BG_BUTTON, fg=style.FG_BUTTON,
                   font=("Segoe UI",10,"bold"), relief="flat", padx=10,pady=4).pack(side="left", padx=5)
 
+        # ==== Toolbar Container ====
+        toolbar_section = tk.Frame(self, bg=style.BG_TOOLBAR)
+        toolbar_section.pack(side="top", fill="x", padx=10, pady=5)
+
+        # ==== Left Container: Point Processing ====
+        point_container = tk.Frame(toolbar_section, bg=style.BG_TOOLBAR)
+        point_container.pack(side="left", padx=10, pady=5)
+
+        point_frame = tk.LabelFrame(point_container, text="Point Processing Methods",
+                                    bg=style.BG_TOOLBAR, fg="black",
+                                    font=("Segoe UI", 9, "bold"), padx=10, pady=5, labelanchor="n")
+        point_frame.pack(side="top")
+
+        tk.Button(point_frame, text="Grayscale", command=self.apply_grayscale,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+        tk.Button(point_frame, text="Negative", command=self.apply_negative,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+        tk.Button(point_frame, text="Threshold", command=self.apply_threshold,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+        tk.Button(point_frame, text="Gamma", command=self.apply_gamma,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+        tk.Button(point_frame, text="Hist Eq", command=self.apply_hist_eq,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+        tk.Button(point_frame, text="Reset", command=self.reset_image,
+                bg="#37474F", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+
+        # ==== Right Container: Filtering ====
+        filter_container = tk.Frame(toolbar_section, bg=style.BG_TOOLBAR)
+        filter_container.pack(side="left", padx=10, pady=5)
+
+        filter_frame = tk.LabelFrame(filter_container, text="Filtering Methods",
+                                    bg=style.BG_TOOLBAR, fg="black",
+                                    font=("Segoe UI", 9, "bold"), padx=10, pady=5, labelanchor="n")
+        filter_frame.pack(side="top")
+
+        tk.Button(filter_frame, text="Averaging Filter", command=self.apply_averaging,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+
+        tk.Button(filter_frame, text="Median Filter", command=self.apply_median,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+
+        tk.Button(filter_frame, text="Laplacian Highpass", command=self.apply_laplacian,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+
+        tk.Button(filter_frame, text="Unsharp Masking", command=self.apply_unsharp,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+
+        tk.Button(filter_frame, text="Highboost Filtering", command=self.apply_highboost,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+
+        tk.Button(filter_frame, text="Sobel Gradient", command=self.apply_sobel,
+                bg="#5c6f75", fg="white", font=("Segoe UI", 10, "bold"),
+                relief="flat", padx=10, pady=4).pack(side="left", padx=4)
+
+
         # Main Frame
         main_frame = tk.Frame(self, bg=style.BG_MAIN)
         main_frame.pack(fill="both", expand=True, padx=10, pady=10)
@@ -138,7 +206,7 @@ class PCXViewer(tk.Frame):
         self.palette_canvas = tk.Canvas(info_frame, width=256, height=128, bg="#fff", bd=1, relief="solid")
         self.palette_canvas.pack(anchor="w")
 
-        # Enhancement scrollable panel (smaller height)
+        # Enhancement scrollable panel
         self.enhance_container = tk.Frame(canvas_frame)
         self.enhance_container.pack(side="bottom", fill="x", pady=(10,0))
         self.enhance_canvas = tk.Canvas(self.enhance_container, height=250)
@@ -181,7 +249,7 @@ class PCXViewer(tk.Frame):
             self.display_image()
             self.show_header_info()
             self.draw_palette()
-            self.show_enhancements()  # automatically display enhancements
+            self.show_enhancements()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open PCX file:\n{e}")
 
@@ -213,13 +281,25 @@ class PCXViewer(tk.Frame):
             self.pan_start=(event.x,event.y)
 
     # ==== Pixel info ====
-    def get_pixel_info(self,event):
+    def get_pixel_info(self, event):
         if self.image:
-            x=int(self.canvas.canvasx(event.x)/self.zoom_factor)
-            y=int(self.canvas.canvasy(event.y)/self.zoom_factor)
-            if 0<=x<self.image.width and 0<=y<self.image.height:
-                rgb=self.image.getpixel((x,y))
-                r,g,b=rgb[:3]
+            x = int(self.canvas.canvasx(event.x) / self.zoom_factor)
+            y = int(self.canvas.canvasy(event.y) / self.zoom_factor)
+            if 0 <= x < self.image.width and 0 <= y < self.image.height:
+                rgb = self.image.getpixel((x, y))
+
+                # Handle grayscale and RGB pixels safely
+                if isinstance(rgb, int):
+                    r = g = b = rgb
+                elif isinstance(rgb, tuple):
+                    if len(rgb) == 1:
+                        r = g = b = rgb[0]
+                    else:
+                        r, g, b = rgb[:3]
+                else:
+                    r = g = b = 0
+
+                # Update labels and color preview
                 self.pixel_label.config(text=f"X:{x}\nY:{y}\nR:{r}\nG:{g}\nB:{b}")
                 self.color_preview.config(bg=f"#{r:02x}{g:02x}{b:02x}")
 
@@ -267,14 +347,12 @@ class PCXViewer(tk.Frame):
             frame = tk.Frame(self.enhance_inner_frame, bg=style.BG_MAIN)
             frame.pack(side="left", padx=5, pady=5)
 
-            # Build image
             img = build_photoimage_from_rgb_rows(img_rows)
             tk.Label(frame, text=name, bg=style.BG_MAIN).pack()
             lbl_img = tk.Label(frame, image=img, bg=style.BG_MAIN)
             lbl_img.pack()
             self.enhance_refs.append(img)
 
-            # Match histogram height with image
             img_height = img.height()
             hist_img_pil = plot_histogram_image(hist, color=color, width=img.width(), height=img_height)
             tk.Label(frame, text=f"{name} Histogram", bg=style.BG_MAIN).pack()
@@ -282,11 +360,190 @@ class PCXViewer(tk.Frame):
             tk.Label(frame, image=hist_img, bg=style.BG_MAIN).pack()
             self.enhance_refs.append(hist_img)
 
-# ==== Main ====
-if __name__=="__main__":
-    root=tk.Tk()
-    root.title("PCX Viewer with Side-by-Side Enhancement")
-    root.geometry("1200x800")
-    app=PCXViewer(root)
-    app.pack(fill="both", expand=True)
-    root.mainloop()
+    # ==== Point Processing Functions ====
+    def apply_grayscale(self):
+        if self.image:
+            arr = list(self.image.convert("RGB").getdata())
+            w, h = self.image.size
+            rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+            result_rows = ip.to_grayscale(rgb_rows)
+            arr_out = [px for row in result_rows for px in row]
+            self.image = Image.new("RGB", (w, h))
+            self.image.putdata(arr_out)
+            self.display_image()
+
+    def apply_negative(self):
+        if self.image:
+            arr = list(self.image.convert("RGB").getdata())
+            w, h = self.image.size
+            rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+            result_rows = ip.to_negative(rgb_rows)
+            arr_out = [px for row in result_rows for px in row]
+            self.image = Image.new("RGB", (w, h))
+            self.image.putdata(arr_out)
+            self.display_image()
+
+    def apply_threshold(self):
+        if self.image:
+            try:
+                value = simpledialog.askinteger("Threshold", "Enter threshold value (0–255):",
+                                                minvalue=0, maxvalue=255)
+                if value is not None:
+                    arr = list(self.image.convert("RGB").getdata())
+                    w, h = self.image.size
+                    rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+                    result_rows = ip.manual_threshold(rgb_rows, threshold=value)
+                    arr_out = [px for row in result_rows for px in row]
+                    self.image = Image.new("RGB", (w, h))
+                    self.image.putdata(arr_out)
+                    self.display_image()
+            except Exception as e:
+                messagebox.showerror("Error", f"Thresholding failed:\n{e}")
+
+    def apply_gamma(self):
+        if self.image:
+            try:
+                value = simpledialog.askfloat("Gamma Correction", "Enter gamma value (>0):", minvalue=0.1)
+                if value is not None:
+                    arr = list(self.image.convert("RGB").getdata())
+                    w, h = self.image.size
+                    rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+                    result_rows = ip.gamma_transform(rgb_rows, gamma=value)
+                    arr_out = [px for row in result_rows for px in row]
+                    self.image = Image.new("RGB", (w, h))
+                    self.image.putdata(arr_out)
+                    self.display_image()
+            except Exception as e:
+                messagebox.showerror("Error", f"Gamma transformation failed:\n{e}")
+
+    def apply_hist_eq(self):
+        if self.image:
+            try:
+                import matplotlib.pyplot as plt
+
+                # --- Step 1: Convert current image to RGB rows ---
+                arr = list(self.image.convert("RGB").getdata())
+                w, h = self.image.size
+                rgb_rows = [arr[i * w:(i + 1) * w] for i in range(h)]
+
+                # --- Step 2: Apply histogram equalization using image_processing.py ---
+                result_rows = ip.histogram_equalization(rgb_rows)
+
+                # --- Step 3: Flatten and rebuild the equalized image ---
+                arr_out = [px for row in result_rows for px in row]
+                self.image = Image.new("RGB", (w, h))
+                self.image.putdata(arr_out)
+                self.display_image()
+
+                # --- Step 4: Compute histogram of the equalized image ---
+                hist = [0] * 256
+                for row in result_rows:
+                    for (r, g, b) in row:
+                        gray = (r + g + b) // 3
+                        hist[gray] += 1
+
+                # --- Step 5: Plot histogram in a separate window ---
+                plt.figure("Histogram after Equalization")
+                plt.title("Histogram after Equalization")
+                plt.xlabel("Intensity Value (0–255)")
+                plt.ylabel("Frequency")
+                plt.bar(range(256), hist, width=1.0, color='gray')
+                plt.tight_layout()
+                plt.show()
+
+            except Exception as e:
+                messagebox.showerror("Error", f"Histogram equalization failed:\n{e}")
+
+    def reset_image(self):
+        """Restore the original loaded image"""
+        if self.filename:
+            try:
+                pixels, info, palette = decode_pcx(Path(self.filename))
+                arr = np.array([[tuple(int(c[i:i+2],16) for i in (1,3,5)) for c in row] for row in pixels], dtype=np.uint8)
+                self.image = Image.fromarray(arr)
+                self.display_image()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to reset image:\n{e}")
+
+    # ---------------------------------------------------------------------
+    # Filtering Methods Integration
+    # ---------------------------------------------------------------------
+    
+    def apply_averaging(self):
+        if self.image:
+            arr = list(self.image.convert("RGB").getdata())
+            w, h = self.image.size
+            rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+            result_rows, desc = ft.apply_averaging(rgb_rows)
+            arr_out = [px for row in result_rows for px in row]
+            self.image = Image.new("RGB", (w, h))
+            self.image.putdata(arr_out)
+            self.display_image()
+            messagebox.showinfo("Filter Applied", desc)
+
+    def apply_median(self):
+        if self.image:
+            arr = list(self.image.convert("RGB").getdata())
+            w, h = self.image.size
+            rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+            result_rows, desc = ft.apply_median(rgb_rows)
+            arr_out = [px for row in result_rows for px in row]
+            self.image = Image.new("RGB", (w, h))
+            self.image.putdata(arr_out)
+            self.display_image()
+            messagebox.showinfo("Filter Applied", desc)
+
+    def apply_laplacian(self):
+        if self.image:
+            arr = list(self.image.convert("RGB").getdata())
+            w, h = self.image.size
+            rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+            result_rows, desc = ft.apply_laplacian_highpass(rgb_rows)
+            arr_out = [px for row in result_rows for px in row]
+            self.image = Image.new("RGB", (w, h))
+            self.image.putdata(arr_out)
+            self.display_image()
+            messagebox.showinfo("Filter Applied", desc)
+
+    def apply_unsharp(self):
+        if self.image:
+            value = simpledialog.askfloat("Unsharp Masking", "Enter amount (e.g., 1.0–2.0):", minvalue=0.1)
+            if value is not None:
+                arr = list(self.image.convert("RGB").getdata())
+                w, h = self.image.size
+                rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+                result_rows, desc = ft.apply_unsharp(rgb_rows, amount=value)
+                arr_out = [px for row in result_rows for px in row]
+                self.image = Image.new("RGB", (w, h))
+                self.image.putdata(arr_out)
+                self.display_image()
+                messagebox.showinfo("Filter Applied", desc)
+
+    def apply_highboost(self):
+        if self.image:
+            value = simpledialog.askfloat("Highboost Filter", "Enter amplification factor A (>1):", minvalue=1.0)
+            if value is not None:
+                arr = list(self.image.convert("RGB").getdata())
+                w, h = self.image.size
+                rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+                result_rows, desc = ft.apply_highboost(rgb_rows, A=value)
+                arr_out = [px for row in result_rows for px in row]
+                self.image = Image.new("RGB", (w, h))
+                self.image.putdata(arr_out)
+                self.display_image()
+                messagebox.showinfo("Filter Applied", desc)
+
+    def apply_sobel(self):
+        if self.image:
+            arr = list(self.image.convert("RGB").getdata())
+            w, h = self.image.size
+            rgb_rows = [arr[i*w:(i+1)*w] for i in range(h)]
+            result_rows, desc = ft.apply_sobel_gradient(rgb_rows)
+            arr_out = [px for row in result_rows for px in row]
+            self.image = Image.new("RGB", (w, h))
+            self.image.putdata(arr_out)
+            self.display_image()
+            messagebox.showinfo("Filter Applied", desc)
+
+
+

@@ -6,7 +6,7 @@ from pcx_viewer import PCXViewer
 class ImageApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Image Viewer App")
+        self.title("CMSC162 Final Project 1")
         self.geometry("1000x700")
         self.viewer_frame = None
 
