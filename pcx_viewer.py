@@ -64,9 +64,14 @@ def compute_grayscale_rows_and_hist(rgb_rows: List[List[Tuple[int,int,int]]]):
 def plot_histogram_image(hist, color="gray", width=128, height=128):
     fig, ax = plt.subplots(figsize=(width/100, height/100), dpi=100)
     ax.bar(range(256), hist, color=color)
-    ax.set_xlim(0,255)
+    ax.set_xlim(0, 255)
     ax.set_ylim(0, max(hist)*1.1 if hist else 1)
-    ax.axis('off')
+    ax.set_xlabel("Intensity Value")   # <-- X-axis label
+    ax.set_ylabel("Frequency")         # <-- Y-axis label
+    ax.tick_params(axis='both', which='major', labelsize=6)  # smaller ticks for compact display
+    ax.axis('on')  # keep axes visible
+    plt.tight_layout()
+    
     buf = BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', pad_inches=0)
     plt.close(fig)
@@ -182,28 +187,45 @@ class PCXViewer(tk.Frame):
         self.canvas.bind("<Button-4>", self.on_mousewheel_linux)
         self.canvas.bind("<Button-5>", self.on_mousewheel_linux)
 
-        # Info Panel
-        info_frame = tk.Frame(main_frame, bg=style.BG_PANEL, bd=2, relief="groove", padx=15, pady=15)
-        info_frame.pack(side="right", fill="y")
-        tk.Label(info_frame, text="Pixel Info", font=style.FONT_HEADER,
-                 bg=style.BG_PANEL, fg=style.FG_TEXT).pack(anchor="w", pady=(0,5))
-        self.pixel_label = tk.Label(info_frame,
+        # Info Panel (scrollable)
+        info_container = tk.Frame(main_frame, bg=style.BG_PANEL, bd=2, relief="groove")
+        info_container.pack(side="right", fill="y")
+
+        # Canvas + scrollbar
+        self.info_canvas = tk.Canvas(info_container, bg=style.BG_PANEL, highlightthickness=0)
+        scrollbar = tk.Scrollbar(info_container, orient="vertical", command=self.info_canvas.yview)
+        self.info_canvas.configure(yscrollcommand=scrollbar.set)
+
+        scrollbar.pack(side="right", fill="y")
+        self.info_canvas.pack(side="left", fill="both", expand=True)
+
+        # Inner frame inside canvas
+        self.info_frame = tk.Frame(self.info_canvas, bg=style.BG_PANEL, padx=15, pady=15)
+        self.info_canvas.create_window((0,0), window=self.info_frame, anchor="nw")
+
+        # Update scrollregion when inner frame changes
+        self.info_frame.bind("<Configure>", lambda e: self.info_canvas.configure(scrollregion=self.info_canvas.bbox("all")))
+
+        # ---- Original content inside info_frame ----
+        tk.Label(self.info_frame, text="Pixel Info", font=style.FONT_HEADER,
+                bg=style.BG_PANEL, fg=style.FG_TEXT).pack(anchor="w", pady=(0,5))
+        self.pixel_label = tk.Label(self.info_frame,
             text="Click on the image to view pixel RGB values.",
             font=style.FONT_TEXT, justify="left", bg=style.BG_PANEL, fg=style.FG_SUBTEXT)
         self.pixel_label.pack(anchor="w", pady=(0,10))
-        self.color_preview = tk.Canvas(info_frame, width=80, height=50, bg="#cccccc", bd=1, relief="solid")
+        self.color_preview = tk.Canvas(self.info_frame, width=80, height=50, bg="#cccccc", bd=1, relief="solid")
         self.color_preview.pack(anchor="w", pady=(0,20))
-        tk.Frame(info_frame, height=2, bg="#e0e0e0").pack(fill="x", pady=10)
-        tk.Label(info_frame, text="Header Info", font=style.FONT_HEADER,
-                 bg=style.BG_PANEL, fg=style.FG_TEXT).pack(anchor="w", pady=(0,5))
-        self.header_text = tk.Text(info_frame, height=12, width=36,
-                                   font=style.FONT_MONO, bg="#f9f9f9", fg="#222",
-                                   relief="flat", wrap="none")
+        tk.Frame(self.info_frame, height=2, bg="#e0e0e0").pack(fill="x", pady=10)
+        tk.Label(self.info_frame, text="Header Info", font=style.FONT_HEADER,
+                bg=style.BG_PANEL, fg=style.FG_TEXT).pack(anchor="w", pady=(0,5))
+        self.header_text = tk.Text(self.info_frame, height=12, width=36,
+                                font=style.FONT_MONO, bg="#f9f9f9", fg="#222",
+                                relief="flat", wrap="none")
         self.header_text.pack(anchor="w", pady=(0,5))
         self.header_text.configure(state="disabled")
-        tk.Label(info_frame, text="Color Palette", font=style.FONT_HEADER,
-                 bg=style.BG_PANEL, fg=style.FG_TEXT).pack(anchor="w", pady=(10,5))
-        self.palette_canvas = tk.Canvas(info_frame, width=256, height=128, bg="#fff", bd=1, relief="solid")
+        tk.Label(self.info_frame, text="Color Palette", font=style.FONT_HEADER,
+                bg=style.BG_PANEL, fg=style.FG_TEXT).pack(anchor="w", pady=(10,5))
+        self.palette_canvas = tk.Canvas(self.info_frame, width=256, height=128, bg="#fff", bd=1, relief="solid")
         self.palette_canvas.pack(anchor="w")
 
         # Enhancement scrollable panel
@@ -239,19 +261,22 @@ class PCXViewer(tk.Frame):
 
     def load_pcx(self, file_path):
         try:
-            pixels, info, palette = decode_pcx(Path(file_path))
+            # Use manual decoding from pcxdecoder
+            pixels, info, palette = decode_pcx(Path(file_path))  # palette is now manually decoded
             self.filename = file_path
             self.header_info = info
-            self.palette = palette
+            self.palette = palette  # ← manual palette from decoder
+
             arr = np.array([[tuple(int(c[i:i+2],16) for i in (1,3,5)) for c in row] for row in pixels], dtype=np.uint8)
             self.image = Image.fromarray(arr)
             self.zoom_factor = 1.0
             self.display_image()
             self.show_header_info()
-            self.draw_palette()
+            self.draw_palette()  # will now display manual palette
             self.show_enhancements()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to open PCX file:\n{e}")
+
 
     # ==== Display & Zoom ====
     def display_image(self, img=None):

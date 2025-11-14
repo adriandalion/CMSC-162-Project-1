@@ -5,7 +5,7 @@ pcxdecoder.py — Manual PCX RLE decoder (no Pillow)
 Reads:
 - Header info (manufacturer, version, encoding, etc.)
 - Image pixel data
-- Optional VGA palette
+- Optional VGA palette (manually decoded)
 Returns:
     pixels (list[list[str]]), header_info (dict), palette (list[tuple[int,int,int]])
 """
@@ -73,13 +73,16 @@ def decode_pcx_rle(fp, expected_bytes: int) -> bytes:
     return bytes(out[:expected_bytes])
 
 
-def read_vga_palette(path: Path) -> Optional[List[Tuple[int, int, int]]]:
-    """Read 256-color VGA palette (769-byte signature block at end of file)."""
-    data = path.read_bytes()
-    if len(data) < 769 or data[-769] != 0x0C:
+def read_vga_palette_manual(path: Path) -> Optional[List[Tuple[int, int, int]]]:
+    """Manual read of 256-color VGA palette (769 bytes at end of file)."""
+    try:
+        data = Path(path).read_bytes()
+        if len(data) < 769 or data[-769] != 0x0C:
+            return None
+        raw = data[-768:]
+        return [tuple(raw[i:i+3]) for i in range(0, 768, 3)]
+    except Exception:
         return None
-    raw = data[-768:]
-    return [tuple(raw[i:i+3]) for i in range(0, 768, 3)]
 
 
 def decode_pcx(path: Path):
@@ -105,7 +108,7 @@ def decode_pcx(path: Path):
 
         # ---- Handle 8-bit Indexed ----
         if header.bits_per_pixel == 8 and header.nplanes == 1:
-            palette = read_vga_palette(path)
+            palette = read_vga_palette_manual(path)
             pixels = []
             for y in range(height):
                 line = decoded_rows[y][:header.bytes_per_line]
